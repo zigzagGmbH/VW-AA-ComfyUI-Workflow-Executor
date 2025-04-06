@@ -1,0 +1,17 @@
+argcomplete==3.5.1
+bitarray==2.9.3
+bitstring==4.2.3
+certifi==2025.1.31
+cffi==1.17.1
+cryptography==43.0.3
+ecdsa==0.19.0
+esptool==4.8.1
+intelhex==2.3.0
+packaging==24.2
+pillow==11.1.0
+pycparser==2.22
+pyserial==3.5
+PyYAML==6.0.2
+reedsolo==1.7.0
+six==1.16.0
+wheel @ file:///opt/homebrew/Cellar/python%403.13/3.13.2/libexec/wheel-0.45.1-py3-none-any.whl#sha256=b9235939e2096903717cb6bfc132267f8a7e46deb2ec3ef9c5e234ea301795d0

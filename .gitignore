@@ -1,0 +1,4 @@
+venv/*
+.venv/*
+.DS_Strore
+DS_Strore
