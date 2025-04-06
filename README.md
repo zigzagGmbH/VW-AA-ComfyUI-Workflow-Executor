@@ -59,36 +59,9 @@ python3 comfyui-workflow-runner.py
 
 ### Example Output
 
-```bash
-Successfully loaded workflow from workflow_api.json
+> Ignore the first few frames where I struggle with the correct imports and installations ... 😵
 
-=== Workflow Details ===
-Model: SDXL/RealVisXL_V4.0.safetensors
-Sampler: dpmpp_2m_sde
-Steps: 20
-CFG Scale: 8
-Prompt: Christopher Nolan's Tumbler Batmobile...
-
-Do you want to proceed with this workflow? (y/n): y
-User confirmed. Proceeding with workflow execution...
-Connecting to WebSocket at ws://127.0.0.1:8000/ws...
-Got session ID: 4921363473c149bfaab99efa190033b3
-Submitting workflow to http://127.0.0.1:8000/prompt with client_id: 4921363473c149bfaab99efa190033b3
-Workflow submitted successfully. Prompt ID: 6f962d0e-40d9-45e8-b378-7247258cadde
-Subscribed to prompt: 6f962d0e-40d9-45e8-b378-7247258cadde
-
-Waiting for execution events...
-EVENT: execution_start
-EVENT: executing
-  Executing: CLIP Text Encode (Negative Prompt)
-EVENT: executing
-  Executing: CLIP Text Encode (Positive Prompt)
-EVENT: executing
-  Executing: KSampler
-EVENT: progress
-  Progress: 1/20 (5%)
-...
-```
+![alt text](_assets/running.gif)
 
 ### What is the script doing? 
 
