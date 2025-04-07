@@ -80,7 +80,7 @@
   },
   "11": {
     "inputs": {
-      "text": "Christopher Nolan's Tumbler Batmobile with matte black finish, Top down camera view with depth of field, reflecting ambient light in dark ambience, parked in an underground empty concrete cold garage from the dark knight, volumetric lighting in dark ambience, light and shadows build the intricate silhouette, background very dark and black with almost no light and so background details not visible but blurry a bit is the background.",
+      "text": "Christopher Nolan's Tumbler Batmobile with matte black finish and red tires, Orthographic cinematic camera view with depth of field, reflecting ambient light in dark ambience, parked in an underground empty concrete cold garage from the dark knight, volumetric lighting in dark ambience, light and shadows build the intricate silhouette, background very dark and black with almost no light and so background details not visible but blurry a bit is the background.",
       "clip": [
         "1",
         1
@@ -142,7 +142,7 @@
   },
   "26": {
     "inputs": {
-      "filename_prefix": "scpt_cui",
+      "filename_prefix": "test_scpt_cui",
       "images": [
         "7",
         0
