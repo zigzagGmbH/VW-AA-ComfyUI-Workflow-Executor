@@ -8,8 +8,8 @@ import signal
 
 # Global variables to track state
 current_prompt_id = None
-server = "127.0.0.1"
-port = 8000
+server = "192.168.1.126"
+port = 8188
 
 def cancel_workflow(prompt_id):
     """Cancel workflows using the global interrupt endpoint"""
@@ -60,7 +60,7 @@ def get_user_confirmation():
         else:
             print("Please enter 'y' or 'n'.")
 
-async def run_workflow_and_monitor(server_addr="127.0.0.1", port_num=8000, workflow_file="workflow_api.json"):
+async def run_workflow_and_monitor(server_addr="127.0.0.1", port_num=8188, workflow_file="txt_to_img_hello_world_sdxl_api_comfy_cli_ver.json"):
     global current_prompt_id, server, port
     server = server_addr
     port = port_num
@@ -228,7 +228,7 @@ if __name__ == "__main__":
     print("Starting ComfyUI workflow executor (Press Ctrl+C to cancel at any time)")
     try:
         # Try to run the workflow from the file
-        asyncio.run(run_workflow_and_monitor())
+        asyncio.run(run_workflow_and_monitor(server_addr=server, port_num=port))
     except KeyboardInterrupt:
         # This should be caught by the signal handler, but just in case
         print("\nKeyboard interrupt detected.")
