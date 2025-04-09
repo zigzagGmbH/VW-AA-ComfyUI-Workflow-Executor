@@ -11,6 +11,7 @@ current_prompt_id = None
 server = "192.168.1.126"
 port = 8188
 
+
 def cancel_workflow(prompt_id):
     """Cancel workflows using the global interrupt endpoint"""
     try:
@@ -30,6 +31,8 @@ def cancel_workflow(prompt_id):
         return False
 
 
+
+
 def signal_handler(sig, frame):
     """Handle Ctrl+C and other termination signals"""
     print("\nReceived termination signal. Cancelling workflow and exiting...")
@@ -40,6 +43,8 @@ def signal_handler(sig, frame):
     
     print("Exiting gracefully.")
     sys.exit(0)
+
+
 
 # Register signal handlers
 signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
@@ -59,6 +64,7 @@ def get_user_confirmation():
             return True
         else:
             print("Please enter 'y' or 'n'.")
+
 
 async def run_workflow_and_monitor(server_addr="127.0.0.1", port_num=8188, workflow_file="txt_to_img_hello_world_sdxl_api_comfy_cli_ver.json"):
     global current_prompt_id, server, port
@@ -118,8 +124,11 @@ async def run_workflow_and_monitor(server_addr="127.0.0.1", port_num=8188, workf
         print("User chose not to proceed. Exiting without submitting workflow.")
         return
     
+
     print("\nUser confirmed. Proceeding with workflow execution...")
     
+
+
     # Connect to WebSocket first
     ws_url = f"ws://{server}:{port}/ws"
     print(f"Connecting to WebSocket at {ws_url}...")
