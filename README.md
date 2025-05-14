@@ -43,19 +43,13 @@ python3 -m pip install -r requirements.txt
 python3 comfyui-workflow-runner.py
 ```
 
-### The script will
+### Understanding
 
-1. Load the workflow from the JSON file
-2. Display a summary and ask for confirmation
-3. Connect to ComfyUI and execute the workflow
-4. Show real-time progress updates
-
-### Features
-
-1. Interactive Confirmation: Asks before executing to avoid accidental runs
-2. Real-time Monitoring: Shows which nodes are executing and progress percentage
-3. Graceful Cancellation: Press Ctrl+C to cancel execution
-4. Automatic Session Handling: Uses WebSocket session ID for proper workflow tracking
+```python
+curr_workflow = "workflow_api.json" # Is where you supply the workflow file
+RUN_MODE = "continuous"  # Options: "single_shot" or "continuous"
+AUTO_EXECUTE_ON_UPLOAD = False  # To control auto-execution on image upload
+```
 
 ### Example Output
 
@@ -120,7 +114,180 @@ flowchart TD
 
 ---
 
-### What are teh API's availabel to us and have been implemented here?
+### MODE Architechture breakdowns
+
+SINGLE SHOT MODE
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Script as ComfyUI Workflow Runner
+    participant ComfyUI as ComfyUI Server (Port 8188)
+    
+    User->>Script: Launch script with workflow file
+    Script->>Script: Load workflow JSON from file
+    
+    Script->>User: Display workflow summary
+    Script->>User: Ask for confirmation
+    User->>Script: Confirm execution (y/yes)
+    
+    Script->>ComfyUI: Connect to WebSocket
+    ComfyUI-->>Script: Establish connection, return session ID
+    
+    Script->>ComfyUI: POST /prompt with workflow
+    ComfyUI->>ComfyUI: Begin workflow execution
+    ComfyUI-->>Script: Return prompt_id
+    
+    Script->>ComfyUI: Subscribe to prompt updates via WebSocket
+    
+    ComfyUI->>Script: WebSocket: execution_start event
+    ComfyUI->>Script: WebSocket: executing node events
+    ComfyUI->>Script: WebSocket: progress events
+    
+    loop Until execution completes
+        ComfyUI->>Script: WebSocket: node execution events
+        Script->>Script: Log progress to console
+    end
+    
+    ComfyUI->>Script: WebSocket: execution_complete event
+    
+    Script->>Script: Log completion
+    Script->>User: Exit script
+    
+    alt User interrupts (Ctrl+C)
+        User->>Script: Send interrupt signal
+        Script->>ComfyUI: POST /interrupt
+        ComfyUI->>ComfyUI: Stop execution
+        Script->>User: Exit script
+    end
+```
+
+---
+
+CONTINUE MODE
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Middleware as Our Middleware (Port 8189)
+    participant ComfyUI as ComfyUI Server (Port 8188)
+    
+    note over Client,ComfyUI: Initial Setup Phase
+    Client->>Middleware: Script starts in "continuous" mode
+    Middleware->>ComfyUI: Test connectivity (/system_stats)
+    ComfyUI-->>Middleware: Return system info
+    Middleware->>Middleware: Load workflow from file
+    Middleware->>ComfyUI: Connect to WebSocket
+    ComfyUI-->>Middleware: Establish connection, get session ID
+    
+    note over Client,ComfyUI: Workflow Update Phase
+    Client->>Middleware: POST /upload/image (with image data)
+    Middleware->>Middleware: Save image to temp file
+    Middleware->>ComfyUI: Forward image to /upload/image
+    ComfyUI->>ComfyUI: Store image
+    ComfyUI-->>Middleware: Return image name & info
+    Middleware->>Middleware: Update workflow JSON with new image
+    Middleware-->>Client: Return success message
+    
+    Client->>Middleware: POST /update/prompt (with node_id and text)
+    Middleware->>Middleware: Update prompt in workflow JSON
+    Middleware-->>Client: Return success message
+    
+    note over Client,ComfyUI: Execution Phase
+    Client->>Middleware: GET /queue (trigger execution)
+    Middleware->>ComfyUI: POST /prompt with modified workflow
+    ComfyUI->>ComfyUI: Begin workflow execution
+    ComfyUI-->>Middleware: Return prompt_id
+    Middleware-->>Client: Return "execution started" message
+    
+    note over Client,ComfyUI: Monitoring Phase
+    ComfyUI->>Middleware: WebSocket: execution_start event
+    ComfyUI->>Middleware: WebSocket: executing node events
+    ComfyUI->>Middleware: WebSocket: progress events
+    
+    alt Interrupt Execution
+        Client->>Middleware: POST /interrupt
+        Middleware->>ComfyUI: POST /interrupt
+        ComfyUI->>ComfyUI: Stop execution
+        ComfyUI-->>Middleware: Return success
+        Middleware-->>Client: Return "interrupted" message
+    else Complete Execution
+        ComfyUI->>Middleware: WebSocket: execution_complete event
+        Middleware->>Middleware: Log completion, reset status
+        note right of Client: Generated image available in ComfyUI output folder
+    end
+```
+
+CONTINIOUS MODE MIDDLE WARE ARCHITECHTURE
+
+```mermaid
+graph TD
+    subgraph "Client"
+        C1["External Client\n(curl, browser, etc.)"]
+    end
+
+    subgraph "Our Middleware (Port 8189)"
+        MS["HTTP Server"]
+        MW["Workflow Manager"]
+        MC["ComfyUI Client"]
+        WS["WebSocket Client"]
+    end
+
+    subgraph "ComfyUI Server (Port 8188)"
+        CS["ComfyUI HTTP Server"]
+        CWS["ComfyUI WebSocket Server"]
+        CE["Execution Engine"]
+        CFS["File Storage"]
+    end
+
+    %% Client to Middleware interactions
+    C1 -->|"1. POST /upload/image\n(with image data)"| MS
+    C1 -->|"2. POST /update/prompt\n(with prompt text)"| MS
+    C1 -->|"3. GET /queue\n(trigger execution)"| MS
+    C1 -->|"4. POST /interrupt\n(cancel execution)"| MS
+
+    %% Internal middleware flow
+    MS -->|"Process requests"| MW
+    MW -->|"Store & update workflow"| MW
+
+    %% Middleware to ComfyUI interactions
+    MC -->|"Forward image\nto /upload/image"| CS
+    MC -->|"Submit workflow\nvia /prompt"| CS
+    MC -->|"Request interrupt\nvia /interrupt"| CS
+
+    %% WebSocket communication
+    WS <-->|"Monitor execution\nvia WebSocket"| CWS
+    CWS <-->|"Send execution\nevents"| CE
+
+    %% ComfyUI internal flow
+    CS -->|"Forward requests"| CE
+    CE -->|"Store images"| CFS
+
+    %% Response flows
+    CS -->|"Return responses"| MC
+    MC -->|"Process responses"| MS
+    MS -->|"Return results to client"| C1
+
+    %% Additional notes
+    classDef middleware fill:#b3e0ff,stroke:#0066cc
+    classDef comfyui fill:#ffcccc,stroke:#990000
+    classDef client fill:#d9f2d9,stroke:#006600
+
+    class MS,MW,MC,WS middleware
+    class CS,CWS,CE,CFS comfyui
+    class C1 client
+```
+
+### Features
+
+1. Interactive Confirmation: Asks before executing to avoid accidental runs
+2. Real-time Monitoring: Shows which nodes are executing and progress percentage
+3. Graceful Cancellation: Press Ctrl+C to cancel execution
+4. Automatic Session Handling: Uses WebSocket session ID for proper workflow tracking
+
+---
+
+### What are the API's available to us and have been implemented here?
 
 [Check the API docs here](docs/COMFYUI_API.md)
 
