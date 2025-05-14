@@ -1,0 +1,58 @@
+{
+  "3": {
+    "inputs": {
+      "preprocessor": "openpose",
+      "sd_version": "sdxl",
+      "resolution": 1024,
+      "preprocessor_override": "None",
+      "image": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "AV_ControlNetPreprocessor",
+    "_meta": {
+      "title": "ControlNet Preprocessor"
+    }
+  },
+  "6": {
+    "inputs": {
+      "image": "test_feet_1.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "8": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "interpolation": "nearest",
+      "method": "keep proportion",
+      "condition": "always",
+      "multiple_of": 0,
+      "image": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "ImageResize+",
+    "_meta": {
+      "title": "🔧 Image Resize"
+    }
+  },
+  "12": {
+    "inputs": {
+      "filename_prefix": "img_upload_via_api_test",
+      "images": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}
