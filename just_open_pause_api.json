@@ -54,46 +54,5 @@
     "_meta": {
       "title": "Save Image"
     }
-  },
-  "13": {
-    "inputs": {
-      "mode": true,
-      "signal": [
-        "15",
-        0
-      ]
-    },
-    "class_type": "ImpactQueueTrigger",
-    "_meta": {
-      "title": "Queue Trigger"
-    }
-  },
-  "14": {
-    "inputs": {
-      "mode": "always",
-      "volume": 0.5,
-      "file": "notify.mp3",
-      "any": [
-        "13",
-        0
-      ]
-    },
-    "class_type": "PlaySound|pysssss",
-    "_meta": {
-      "title": "PlaySound 🐍"
-    }
-  },
-  "15": {
-    "inputs": {
-      "Delay": 5,
-      "Input": [
-        "3",
-        0
-      ]
-    },
-    "class_type": "Wait",
-    "_meta": {
-      "title": "⌛ Wait (Delay Execution)"
-    }
   }
 }
