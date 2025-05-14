@@ -51,13 +51,123 @@ RUN_MODE = "continuous"  # Options: "single_shot" or "continuous"
 AUTO_EXECUTE_ON_UPLOAD = False  # To control auto-execution on image upload
 ```
 
-### Example Output
+If run mode is `continuous` you send it HTTP reqs to execute a work flow.
 
-> Ignore the first few frames where I struggle with the correct imports and installations ... 😵
+Our middle ware handles that
 
-![alt text](_assets/running.gif)
+CONTINIOUS MODE MIDDLE WARE ARCHITECHTURE
 
-### What is the script doing? 
+```mermaid
+graph TD
+    subgraph "Client"
+        C1["External Client\n(curl, browser, etc.)"]
+    end
+
+    subgraph "Our Middleware (Port 8189)"
+        MS["HTTP Server"]
+        MW["Workflow Manager"]
+        MC["ComfyUI Client"]
+        WS["WebSocket Client"]
+    end
+
+    subgraph "ComfyUI Server (Port 8188)"
+        CS["ComfyUI HTTP Server"]
+        CWS["ComfyUI WebSocket Server"]
+        CE["Execution Engine"]
+        CFS["File Storage"]
+    end
+
+    %% Client to Middleware interactions
+    C1 -->|"1. POST /upload/image\n(with image data)"| MS
+    C1 -->|"2. POST /update/prompt\n(with prompt text)"| MS
+    C1 -->|"3. GET /queue\n(trigger execution)"| MS
+    C1 -->|"4. POST /interrupt\n(cancel execution)"| MS
+
+    %% Internal middleware flow
+    MS -->|"Process requests"| MW
+    MW -->|"Store & update workflow"| MW
+
+    %% Middleware to ComfyUI interactions
+    MC -->|"Forward image\nto /upload/image"| CS
+    MC -->|"Submit workflow\nvia /prompt"| CS
+    MC -->|"Request interrupt\nvia /interrupt"| CS
+
+    %% WebSocket communication
+    WS <-->|"Monitor execution\nvia WebSocket"| CWS
+    CWS <-->|"Send execution\nevents"| CE
+
+    %% ComfyUI internal flow
+    CS -->|"Forward requests"| CE
+    CE -->|"Store images"| CFS
+
+    %% Response flows
+    CS -->|"Return responses"| MC
+    MC -->|"Process responses"| MS
+    MS -->|"Return results to client"| C1
+
+    %% Additional notes
+    classDef middleware fill:#b3e0ff,stroke:#0066cc
+    classDef comfyui fill:#ffcccc,stroke:#990000
+    classDef client fill:#d9f2d9,stroke:#006600
+
+    class MS,MW,MC,WS middleware
+    class CS,CWS,CE,CFS comfyui
+    class C1 client
+```
+
+HTTP Request examples:
+
+> Pretty self explanantory
+
+1. Simple text-to-image workflow
+
+```bash
+# Update the Positive prompt but do not execute (Remember to set AUTO_EXECUTE_ON_UPLOAD = False in the script)
+curl -X POST -H "Content-Type: application/json" -d '{"type": "positive", "text": "Mouse knight, Pixar style, standing on a table, wearing boots and wearing gloves, wearing a red cape and a berown musketters hat, holding a think blade in his hand, blurry background"}' http://localhost:8189/update/prompt 
+
+# [Optional] Update the Negative prompt but do not execute (Remember to set AUTO_EXECUTE_ON_UPLOAD = False in the script)
+curl -X POST -H "Content-Type: application/json" -d '{"type": "negative", "text": "Low quality, pixelated, humans, text"}' http://localhost:8189/update/prompt
+
+# Execute the workflow with the updated prompt - say it's a simple text-to-image workflow
+curl -v http://localhost:8189/queue 
+
+# Stop the executin in the middle
+curl -X POST http://localhost:8189/interrupt
+```
+
+2. Simple image-to-image workflow
+
+```bash
+# Update the image in "LoadImage" node but do not execute (Remember to set AUTO_EXECUTE_ON_UPLOAD = False in the script)
+curl -X POST -F "image=@/path/to/your/image.jpg" http://localhost:8189/upload/image 
+
+# Execute the workflow with the updated prompt - say it's a simple text-to-image workflow
+curl -v http://localhost:8189/queue 
+
+# Stop the executin in the middle
+curl -X POST http://localhost:8189/interrupt
+```
+
+1. text + image -> image workflow
+
+```bash
+# Update the image in "LoadImage" node but do not execute (Remember to set AUTO_EXECUTE_ON_UPLOAD = False in the script)
+curl -X POST -F "image=@/path/to/your/image.jpg" http://localhost:8189/upload/image 
+
+# Update the Positive prompt but do not execute (Remember to set AUTO_EXECUTE_ON_UPLOAD = False in the script)
+curl -X POST -H "Content-Type: application/json" -d '{"type": "positive", "text": "Mouse knight, Pixar style, standing on a table, wearing boots and wearing gloves, wearing a red cape and a berown musketters hat, holding a think blade in his hand, blurry background"}' http://localhost:8189/update/prompt 
+
+# [Optional] Update the Negative prompt but do not execute (Remember to set AUTO_EXECUTE_ON_UPLOAD = False in the script)
+curl -X POST -H "Content-Type: application/json" -d '{"type": "negative", "text": "Low quality, pixelated, humans, text"}' http://localhost:8189/update/prompt
+
+# Execute the workflow with the updated prompt - say it's a simple text-to-image workflow
+curl -v http://localhost:8189/queue 
+
+# Stop the executin in the middle
+curl -X POST http://localhost:8189/interrupt
+```
+
+### What is the script doing?
 
 > If mermaid is not visisble in your markdown renderer, checkout the [png](_assets/script_test_api_flow.png) /[svg](_assets/script_test_api_flow.svg) / [UML](https://www.planttext.com?text=RLFBRkCm3BpxAtXC3yNUwyDsiUtsWSKsg5FqM3Wo7GknHK6ay_ZxfMmb2f1UR9ap7758-fwb3Z8EVI5MUeJVDBJ7ZnVufB1jUzfhm4cW7YeJh9UYcFZ5tL-g6zYVIA_LspzeROzbOLjO_D4JuC6oyCyRa0uTB8x8DmN0tODbtzV7dClZCDJXM4Rm5s-XfG0ZOm13hhLXgCMIYsXK_hW0hhHLGAjrQ0I4u1FN5PajIZb3xsZGxX0OcLKHNXuIK8thmKekQ6ThU5wjbh1ygrPHwOSFDFYJpXCAp84lsq2h9mZ8dXnZ5cJjrXfZyao5qJUr8C-CwR7lOfSMZmSqOxIejWRVew3QiWmBHxCd5Lm6CbfrjWIuGoT93S2H80IxwIG506wr_qduQnxPTuYfJOVDDUGs5p5ri567V4NxBZEA9Xy9HDTC1QRFz3eFqph144P_lIh9V1K5pgCuqylCU3p4yLdfOD0owmrcZ8LyhiEsHJfDpS-pqENm54HtqSH6jsD_caRQFUmPyqZoZJJ69DsVQQScvdJD9VyahdLJA8kPC1LshsVzzVu3)
 > 
@@ -218,65 +328,7 @@ sequenceDiagram
     end
 ```
 
-CONTINIOUS MODE MIDDLE WARE ARCHITECHTURE
 
-```mermaid
-graph TD
-    subgraph "Client"
-        C1["External Client\n(curl, browser, etc.)"]
-    end
-
-    subgraph "Our Middleware (Port 8189)"
-        MS["HTTP Server"]
-        MW["Workflow Manager"]
-        MC["ComfyUI Client"]
-        WS["WebSocket Client"]
-    end
-
-    subgraph "ComfyUI Server (Port 8188)"
-        CS["ComfyUI HTTP Server"]
-        CWS["ComfyUI WebSocket Server"]
-        CE["Execution Engine"]
-        CFS["File Storage"]
-    end
-
-    %% Client to Middleware interactions
-    C1 -->|"1. POST /upload/image\n(with image data)"| MS
-    C1 -->|"2. POST /update/prompt\n(with prompt text)"| MS
-    C1 -->|"3. GET /queue\n(trigger execution)"| MS
-    C1 -->|"4. POST /interrupt\n(cancel execution)"| MS
-
-    %% Internal middleware flow
-    MS -->|"Process requests"| MW
-    MW -->|"Store & update workflow"| MW
-
-    %% Middleware to ComfyUI interactions
-    MC -->|"Forward image\nto /upload/image"| CS
-    MC -->|"Submit workflow\nvia /prompt"| CS
-    MC -->|"Request interrupt\nvia /interrupt"| CS
-
-    %% WebSocket communication
-    WS <-->|"Monitor execution\nvia WebSocket"| CWS
-    CWS <-->|"Send execution\nevents"| CE
-
-    %% ComfyUI internal flow
-    CS -->|"Forward requests"| CE
-    CE -->|"Store images"| CFS
-
-    %% Response flows
-    CS -->|"Return responses"| MC
-    MC -->|"Process responses"| MS
-    MS -->|"Return results to client"| C1
-
-    %% Additional notes
-    classDef middleware fill:#b3e0ff,stroke:#0066cc
-    classDef comfyui fill:#ffcccc,stroke:#990000
-    classDef client fill:#d9f2d9,stroke:#006600
-
-    class MS,MW,MC,WS middleware
-    class CS,CWS,CE,CFS comfyui
-    class C1 client
-```
 
 ### Features
 
