@@ -203,7 +203,8 @@ async def connect_websocket(server, port):
     """Connect to the ComfyUI WebSocket endpoint"""
     global ws_connection, session_id
 
-    if ws_connection and not ws_connection.closed:
+    # if ws_connection and not ws_connection.closed:
+    if ws_connection:
         print("Using existing WebSocket connection")
         return ws_connection
 
@@ -245,8 +246,12 @@ async def execute_workflow(workflow_json):
     execution_status = "running"
 
     # Connect to WebSocket first
-    ws = await connect_websocket(server, port)
-    if not ws:
+    # ws = await connect_websocket(server, port)
+    # if not ws:
+    #     return False
+    # Connect to WebSocket first
+    await connect_websocket(server, port)  # Updates global ws_connection
+    if not ws_connection:
         return False
 
     # Submit the workflow with the session ID as client_id
