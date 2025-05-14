@@ -18,7 +18,8 @@ colorama.init()
 current_prompt_id = None
 server = "127.0.0.1"
 port = 8188
-curr_workflow = "just_open_pause_api.json"
+# curr_workflow = "just_open_pause_api.json"
+curr_workflow = "workflow_api.json"
 MIDDLEWARE_HTTP_PORT = 8189  # Port for our middle ware HTTP server
 
 
@@ -203,10 +204,12 @@ async def connect_websocket(server, port):
     """Connect to the ComfyUI WebSocket endpoint"""
     global ws_connection, session_id
 
-    # if ws_connection and not ws_connection.closed:
     if ws_connection:
-        print("Using existing WebSocket connection")
-        return ws_connection
+        try:
+            await ws_connection.close()
+        except Exception as e:
+            print(e)
+            pass  # Ignore errors on close
 
     ws_url = f"ws://{server}:{port}/ws"
     print(
@@ -214,10 +217,6 @@ async def connect_websocket(server, port):
     )
 
     try:
-        # OLD
-        # ws_connection = await websockets.connect(ws_url)
-
-        # TBT
         ws_connection = await websockets.connect(
             ws_url, ping_timeout=60, ping_interval=30
         )
@@ -252,14 +251,11 @@ async def execute_workflow(workflow_json):
     execution_status = "running"
 
     # Connect to WebSocket first
-    # THIS IS MOVED FORM HERE
-    # ws = await connect_websocket(server, port)
-    # if not ws:
-    #     return False
-
-    # Connect to WebSocket first
-    await connect_websocket(server, port)  # Updates global ws_connection
-    if not ws_connection:
+    # Force a new WebSocket connection each time to avoid stale connections
+    ws_connection = None  # Reset the connection
+    ws = await connect_websocket(server, port)
+    if not ws:
+        execution_status = "error"
         return False
 
     # Submit the workflow with the session ID as client_id
@@ -303,7 +299,9 @@ async def execute_workflow(workflow_json):
             # Keep receiving messages until execution completes
             while not execution_complete:
                 try:
-                    message = await ws_connection.recv()
+                    # message = await ws_connection.recv()
+                    message = await asyncio.wait_for(ws_connection.recv(), timeout=180)  # 3-minute timeout
+
                     msg_data = json.loads(message)
                     msg_type = msg_data.get("type")
 
@@ -340,8 +338,18 @@ async def execute_workflow(workflow_json):
                             execution_complete = True
                             break
 
+                except asyncio.TimeoutError:
+                    print(f"{Fore.YELLOW}WebSocket receiving timed out, but execution may still be running.{Style.RESET_ALL}")
+                    execution_status = "unknown"
+                    break
+                    
+                except websockets.exceptions.ConnectionClosedError as e:
+                    print(f"{Fore.LIGHTRED_EX}WebSocket connection closed: {e}{Style.RESET_ALL}")
+                    execution_status = "error"
+                    break
+                    
                 except Exception as e:
-                    print(f"Error receiving message: {e}")
+                    print(f"{Fore.LIGHTRED_EX}Error receiving message: {e}{Style.RESET_ALL}")
                     execution_status = "error"
                     break
 
@@ -425,11 +433,7 @@ async def handle_upload_image(request):
         # Now upload to ComfyUI
         with open(temp_file_path, "rb") as f:
             files = {"image": f}
-            # TBT
-            # data = {'overwrite': 'true'}
             upload_url = f"http://{server}:{port}/upload/image"
-            # TBT
-            # response = requests.post(upload_url, files=files, data=data)
             response = requests.post(upload_url, files=files)
 
         # Remove the temporary file
@@ -471,6 +475,77 @@ async def handle_upload_image(request):
         return web.Response(text=f"Error processing upload: {str(e)}", status=500)
 
 
+async def handle_update_prompt(request):
+    """Update text prompt using semantic identifiers"""
+    global workflow_json, execution_status
+    
+    if execution_status == "running":
+        return web.Response(text="Cannot update prompts while workflow is running", status=400)
+    
+    try:
+        data = await request.json()
+        prompt_type = data.get("type", "").lower()  # "positive" or "negative"
+        prompt_text = data.get("text")
+        
+        if not prompt_type or not prompt_text:
+            return web.Response(text="Missing prompt type or text in request", status=400)
+        
+        # Find the appropriate node based on the prompt type
+        target_node_id = None
+        for node_id, node in workflow_json.items():
+            if (node.get("class_type") == "CLIPTextEncode" and 
+                "_meta" in node and "title" in node["_meta"]):
+                title = node["_meta"]["title"].lower()
+                
+                if (prompt_type == "positive" and ("positive" in title)) or \
+                   (prompt_type == "negative" and ("negative" in title)):
+                    target_node_id = node_id
+                    break
+        
+        if target_node_id:
+            workflow_json[target_node_id]["inputs"]["text"] = prompt_text
+            print(f"{Fore.LIGHTGREEN_EX}Updated {prompt_type} prompt (Node ID: {target_node_id}){Style.RESET_ALL}")
+            return web.Response(text=f"Updated {prompt_type} prompt successfully")
+        else:
+            return web.Response(text=f"No {prompt_type} prompt node found in workflow", status=404)
+            
+    except Exception as e:
+        print(f"{Fore.LIGHTRED_EX}Error updating prompt: {str(e)}{Style.RESET_ALL}")
+        return web.Response(text=f"Error updating prompt: {str(e)}", status=500)
+
+
+async def handle_interrupt(request):
+    """Handle interrupt request to stop the current workflow"""
+    global current_prompt_id, execution_status
+
+    if not current_prompt_id:
+        return web.Response(text="No workflow is currently running", status=400)
+
+    try:
+        url = f"http://{server}:{port}/interrupt"
+        print(f"{Fore.LIGHTYELLOW_EX}Interrupting workflow execution{Style.RESET_ALL}")
+        response = requests.post(url)
+
+        if response.status_code == 200:
+            print(
+                f"{Fore.LIGHTGREEN_EX}Interrupt request sent successfully{Style.RESET_ALL}"
+            )
+            execution_status = "idle"
+            return web.Response(text="Workflow interrupted successfully")
+        else:
+            print(
+                f"{Fore.LIGHTRED_EX}Failed to interrupt workflow: {response.status_code}{Style.RESET_ALL}"
+            )
+            return web.Response(
+                text=f"Failed to interrupt workflow: {response.status_code}", status=500
+            )
+    except Exception as e:
+        print(
+            f"{Fore.LIGHTRED_EX}Error sending interrupt request: {str(e)}{Style.RESET_ALL}"
+        )
+        return web.Response(text=f"Error interrupting workflow: {str(e)}", status=500)
+
+
 async def start_minimal_http_server():
     """Start a minimal HTTP server"""
     app = web.Application()
@@ -479,6 +554,8 @@ async def start_minimal_http_server():
     app.router.add_get("/health", handle_health_check)
     app.router.add_get("/queue", handle_queue)
     app.router.add_post("/upload/image", handle_upload_image)
+    app.router.add_post('/update/prompt', handle_update_prompt)
+    app.router.add_post('/interrupt', handle_interrupt)
 
     # Start the server
     runner = web.AppRunner(app)
@@ -562,6 +639,8 @@ async def run_continuous_mode(
     - GET /health - Health check
     - GET /queue - Trigger workflow execution
     - POST /upload/image - Upload an image and update the workflow
+    - POST /update/prompt - Update text in a prompt node
+    - POST /interrupt - Stop a running workflow
 
     {Fore.LIGHTYELLOW_EX}Auto-execute on upload:{Style.RESET_ALL} {"Enabled" if AUTO_EXECUTE_ON_UPLOAD else "Disabled"}
     """
@@ -570,15 +649,19 @@ async def run_continuous_mode(
     try:
         # Keep the server running until interrupted
         while True:
-            global ws_connection
             # TBT
+            # global ws_connection
             # Add periodic reconnection to keep connection fresh
-            if ws_connection is None or getattr(ws_connection, "closed", False):
-                print("Refreshing WebSocket connection...")
-                await connect_websocket(server, port)
-
-            # OLD
-            # await asyncio.sleep(1)
+            try:
+                # if ws_connection is None or getattr(ws_connection, "closed", False):
+                if ws_connection is None or ws_connection.closed:
+                    # print("Refreshing WebSocket connection...")
+                    # await connect_websocket(server, port)
+                    print(f"{Fore.YELLOW}WebSocket connection needs refresh. Reconnecting...{Style.RESET_ALL}")
+                    await connect_websocket(server, port)
+            except Exception as e:
+                print (e)
+                pass  # Ignore connection check errors
             await asyncio.sleep(30)
     except asyncio.CancelledError:
         print("Server shutdown requested")

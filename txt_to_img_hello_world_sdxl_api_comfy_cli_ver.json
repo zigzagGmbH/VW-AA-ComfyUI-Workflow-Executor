@@ -105,7 +105,7 @@
   },
   "26": {
     "inputs": {
-      "filename_prefix": "scpt_cui",
+      "filename_prefix": "_test_scpt_cui",
       "images": [
         "7",
         0
