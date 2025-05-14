@@ -214,7 +214,13 @@ async def connect_websocket(server, port):
     )
 
     try:
-        ws_connection = await websockets.connect(ws_url)
+        # OLD
+        # ws_connection = await websockets.connect(ws_url)
+
+        # TBT
+        ws_connection = await websockets.connect(
+            ws_url, ping_timeout=60, ping_interval=30
+        )
 
         # Receive initial status message to get session ID
         initial_msg = await ws_connection.recv()
@@ -246,9 +252,11 @@ async def execute_workflow(workflow_json):
     execution_status = "running"
 
     # Connect to WebSocket first
+    # THIS IS MOVED FORM HERE
     # ws = await connect_websocket(server, port)
     # if not ws:
     #     return False
+
     # Connect to WebSocket first
     await connect_websocket(server, port)  # Updates global ws_connection
     if not ws_connection:
@@ -395,11 +403,11 @@ async def handle_upload_image(request):
     try:
         # Process the multipart form data
         reader = await request.multipart()
-            
+
         # Get the image field
         field = await reader.next()
         print(f"Field name: {field.name}, Filename: {field.filename}")
-        
+
         if field.name != "image":
             return web.Response(text="Missing image field", status=400)
 
@@ -562,7 +570,16 @@ async def run_continuous_mode(
     try:
         # Keep the server running until interrupted
         while True:
-            await asyncio.sleep(1)
+            global ws_connection
+            # TBT
+            # Add periodic reconnection to keep connection fresh
+            if ws_connection is None or getattr(ws_connection, "closed", False):
+                print("Refreshing WebSocket connection...")
+                await connect_websocket(server, port)
+
+            # OLD
+            # await asyncio.sleep(1)
+            await asyncio.sleep(30)
     except asyncio.CancelledError:
         print("Server shutdown requested")
     finally:

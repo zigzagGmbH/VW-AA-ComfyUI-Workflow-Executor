@@ -8,17 +8,17 @@ Sourced and made digestible after extensive internet searches, forum browsing, i
 
 | Endpoint | Method | Purpose | Example Response | Example Test Command | Implementation Status |
 |----------|--------|---------|-----------------|--------------|----------------------|
-| `/prompt` | POST | Submit workflow | `{"prompt_id": "6f962d0e-40d9-45e8-b378-7247258cadde", "number": 1, "node_errors": {}}` | Header: `http://127.0.0.1:8000/prompt` <br>Body: `{"prompt": {…},"client_id":"df1465dc01f6446aa65e117c151c44d0"}` | ✅ Implemented |
-| `/queue` | GET | Get current queue status | `{"queue_running": [{"prompt_id": "6f962d0e-40d9-45e8-b378-7247258cadde", "number": 1}], "queue_pending": [{"prompt_id": "7a973e1f-58b9-42d6-b3c5-e7adef5632dc", "number": 2}]}` | `http GET http://127.0.0.1:8000/queue` | 🔶 Testing |
-| `/history` | GET | Get execution history | `{"6f962d0e-40d9-45e8-b378-7247258cadde": {"prompt": {...}, "outputs": {...}, "status": "complete"}}` | `http GET http://127.0.0.1:8000/history` | ❌ Not implemented |
-| `/history/{prompt_id}` | GET | Get specific execution | `{"prompt": {...}, "outputs": {...}, "status": "complete"}` | `http GET http://127.0.0.1:8000/history/6f962d0e-40d9-45e8-b378-7247258cadde` | ❌ Not implemented |
-| `/view` | GET | View generated images | Binary image data (PNG/JPEG) | `http GET http://127.0.0.1:8000/view?filename=ComfyUI_00042_.png --output image.png` | ❌ Not implemented |
-| `/upload/image` | POST | Upload input image | `{"name": "uploaded_image.png", "subfolder": "", "type": "input"}` | `http -f POST http://127.0.0.1:8000/upload/image overwrite=true image@/path/to/image.png` | ❌ Not implemented |
-| `/upload/mask` | POST | Upload mask image | `{"name": "uploaded_mask.png", "subfolder": "", "type": "mask"}` | `http -f POST http://127.0.0.1:8000/upload/mask overwrite=true image@/path/to/mask.png` | ❌ Not implemented |
-| `/object_info` | GET | Get node information | `{"CheckpointLoaderSimple": {"input": {...}, "output": {...}}, "KSampler": {...}}` (Large JSON with all node types) | `http GET http://127.0.0.1:8000/object_info` | ❌ Not implemented |
-| `/system_stats` | GET | Get system statistics | `{"cuda": {"gpu": "NVIDIA GeForce RTX 3080", "vram_total": 10240, "vram_free": 8192}, "system": {"cpu_percent": 25.6, "ram_total": 32768, "ram_free": 16384}}` | `http GET http://127.0.0.1:8000/system_stats` | ❌ Not implemented |
-| `/extensions` | GET | List installed extensions | `{"extensions": ["ComfyUI-Manager", "ComfyUI-Impact-Pack"]}` | `http GET http://127.0.0.1:8000/extensions` | ❌ Not implemented |
-| `/interrupt` | POST | Stop execution | `{"success": true}` | `http POST http://127.0.0.1:8000/interrupt` | ✅ Implemented |
+| `/prompt` | POST | Submit workflow | `{"prompt_id": "6f962d0e-40d9-45e8-b378-7247258cadde", "number": 1, "node_errors": {}}` | Header: `http://127.0.0.1:8189/prompt` <br>Body: `{"prompt": {…},"client_id":"df1465dc01f6446aa65e117c151c44d0"}` | ✅ Implemented |
+| `/queue` | GET | Get current queue status | `{"queue_running": [{"prompt_id": "6f962d0e-40d9-45e8-b378-7247258cadde", "number": 1}], "queue_pending": [{"prompt_id": "7a973e1f-58b9-42d6-b3c5-e7adef5632dc", "number": 2}]}` | `http GET http://127.0.0.1:8189/queue` | 🔶 Testing |
+| `/history` | GET | Get execution history | `{"6f962d0e-40d9-45e8-b378-7247258cadde": {"prompt": {...}, "outputs": {...}, "status": "complete"}}` | `http GET http://127.0.0.1:8189/history` | ❌ Not implemented |
+| `/history/{prompt_id}` | GET | Get specific execution | `{"prompt": {...}, "outputs": {...}, "status": "complete"}` | `http GET http://127.0.0.1:8189/history/6f962d0e-40d9-45e8-b378-7247258cadde` | ❌ Not implemented |
+| `/view` | GET | View generated images | Binary image data (PNG/JPEG) | `http GET http://127.0.0.1:8189/view?filename=ComfyUI_00042_.png --output image.png` | ❌ Not implemented |
+| `/upload/image` | POST | Upload input image | `{"name": "uploaded_image.png", "subfolder": "", "type": "input"}` | `http -f POST curl -X POST -F "image=@/path/to/your/image.jpg" http://localhost:8189/upload/image` | ✅ Implemented |
+| `/upload/mask` | POST | Upload mask image | `{"name": "uploaded_mask.png", "subfolder": "", "type": "mask"}` | `http -f POST http://127.0.0.1:8189/upload/mask image@/path/to/mask.png` | ❌ Not implemented |
+| `/object_info` | GET | Get node information | `{"CheckpointLoaderSimple": {"input": {...}, "output": {...}}, "KSampler": {...}}` (Large JSON with all node types) | `http GET http://127.0.0.1:8189/object_info` | ❌ Not implemented |
+| `/system_stats` | GET | Get system statistics | `{"cuda": {"gpu": "NVIDIA GeForce RTX 3080", "vram_total": 10240, "vram_free": 8192}, "system": {"cpu_percent": 25.6, "ram_total": 32768, "ram_free": 16384}}` | `http GET http://127.0.0.1:8189/system_stats` | ❌ Not implemented |
+| `/extensions` | GET | List installed extensions | `{"extensions": ["ComfyUI-Manager", "ComfyUI-Impact-Pack"]}` | `http GET http://127.0.0.1:8189/extensions` | ❌ Not implemented |
+| `/interrupt` | POST | Stop execution | `{"success": true}` | `http POST http://127.0.0.1:8189/interrupt` | ✅ Implemented |
 
 ## WebSocket Messages
 
