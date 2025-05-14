@@ -395,9 +395,11 @@ async def handle_upload_image(request):
     try:
         # Process the multipart form data
         reader = await request.multipart()
-
+            
         # Get the image field
         field = await reader.next()
+        print(f"Field name: {field.name}, Filename: {field.filename}")
+        
         if field.name != "image":
             return web.Response(text="Missing image field", status=400)
 
@@ -415,7 +417,11 @@ async def handle_upload_image(request):
         # Now upload to ComfyUI
         with open(temp_file_path, "rb") as f:
             files = {"image": f}
+            # TBT
+            # data = {'overwrite': 'true'}
             upload_url = f"http://{server}:{port}/upload/image"
+            # TBT
+            # response = requests.post(upload_url, files=files, data=data)
             response = requests.post(upload_url, files=files)
 
         # Remove the temporary file
