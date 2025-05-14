@@ -23,59 +23,18 @@ MIDDLEWARE_HTTP_PORT = 8189  # Port for our middle ware HTTP server
 
 
 # Global variables to track state
-# RUN_MODE = "server"  # Options: "execute_and_exit" or "server"
 # RUN_MODE = "single_shot"  # Options: "single_shot" or "continuous"
 RUN_MODE = "continuous"  # Options: "single_shot" or "continuous"
 
-
-async def handle_health_check(request):
-    """Simple health check endpoint"""
-    return web.Response(text="ComfyUI Workflow Runner is running")
+AUTO_EXECUTE_ON_UPLOAD = False  # To control auto-execution on image upload
 
 
-async def start_minimal_http_server():
-    """Start a minimal HTTP server"""
-    app = web.Application()
-
-    # Add routes
-    app.router.add_get("/health", handle_health_check)
-
-    # Start the server
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, server, MIDDLEWARE_HTTP_PORT)
-
-    print(f"{Fore.LIGHTYELLOW_EX}Starting HTTP server on:{Fore.LIGHTBLACK_EX} http://{server}:{MIDDLEWARE_HTTP_PORT} {Style.RESET_ALL}")
-    await site.start()
-
-    return runner
-
-
-def test_comfyui_connection(server_addr, port_num):
-    """Test connectivity to ComfyUI server"""
-
-    try:
-        url = f"http://{server_addr}:{port_num}/system_stats"
-        print(
-            f"{Fore.LIGHTYELLOW_EX}Testing connectivity to ComfyUI at{Fore.LIGHTBLACK_EX} {url} {Style.RESET_ALL}"
-        )
-
-        response = requests.get(url)
-        if response.status_code == 200:
-            print(f"{Fore.LIGHTGREEN_EX}ComfyUI connection successful{Style.RESET_ALL}")
-            # [OPTIONAL]
-            # Print some res values
-            return True
-        else:
-            print(
-                f"{Fore.LIGHTRED_EX}ComfyUI connection failed: {Fore.LIGHTBLACK_EX}{response.status_code}{Style.RESET_ALL}"
-            )
-            return False
-    except Exception as e:
-        print(
-            f"{Fore.LIGHTRED_EX}Error connecting to ComfyUI: \n{Fore.LIGHTBLACK_EX}{e}{Style.RESET_ALL}"
-        )
-        return False
+ws_connection = None  # Stores the WebSocket connection object
+session_id = None  # Stores the session ID from ComfyUI's WebSocket
+workflow_json = None  # Stores the loaded workflow JSON in memory
+execution_status = (
+    "idle"  # Tracks the current execution status (idle, running, completed, error)
+)
 
 
 def cancel_workflow(prompt_id):
@@ -116,14 +75,38 @@ signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
 signal.signal(signal.SIGTERM, signal_handler)  # kill command
 
 
+def test_comfyui_connection(server_addr, port_num):
+    """Test connectivity to ComfyUI server"""
+
+    try:
+        url = f"http://{server_addr}:{port_num}/system_stats"
+        print(
+            f"{Fore.LIGHTYELLOW_EX}Testing connectivity to ComfyUI at{Fore.LIGHTBLACK_EX} {url} {Style.RESET_ALL}"
+        )
+
+        response = requests.get(url)
+        if response.status_code == 200:
+            print(f"{Fore.LIGHTGREEN_EX}ComfyUI connection successful{Style.RESET_ALL}")
+            # [OPTIONAL]
+            # Print some res values
+            return True
+        else:
+            print(
+                f"{Fore.LIGHTRED_EX}ComfyUI connection failed: {Fore.LIGHTBLACK_EX}{response.status_code}{Style.RESET_ALL}"
+            )
+            return False
+    except Exception as e:
+        print(
+            f"{Fore.LIGHTRED_EX}Error connecting to ComfyUI: \n{Fore.LIGHTBLACK_EX}{e}{Style.RESET_ALL}"
+        )
+        return False
+
+
 def get_user_confirmation():
     """Get synchronous user confirmation before starting workflow"""
-    print("\n=== Workflow Summary ===")
+
     print(
-        "You are about to execute a ComfyUI workflow which may use significant GPU resources."
-    )
-    print(
-        "This will generate an image based on the workflow in the specified JSON file."
+        f"\n{Fore.LIGHTMAGENTA_EX}You are about to execute a ComfyUI workflow which may use significant GPU resources.{Style.RESET_ALL}"
     )
 
     while True:
@@ -157,7 +140,7 @@ def load_workflow_from_file(
         )
 
         # [OPTIONAL]
-        # # Extract some details for a better summary
+        # Extract some details for a better summary
         # model_node = None
         # sampler_node = None
         # positive_prompt = None
@@ -198,11 +181,306 @@ def load_workflow_from_file(
         return None
 
 
+def update_workflow_with_image(workflow, image_name):
+    """Find LoadImage nodes in workflow and update them with the new image"""
+    updated = False
+
+    # For API format workflow (just_open_pause_api.json)
+    for node_id, node in workflow.items():
+        if isinstance(node, dict) and "class_type" in node:
+            if node["class_type"] == "LoadImage":
+                if "inputs" in node and "image" in node["inputs"]:
+                    node["inputs"]["image"] = image_name
+                    print(
+                        f"{Fore.LIGHTGREEN_EX}Updated LoadImage node (ID: {node_id}) with image: {image_name}{Style.RESET_ALL}"
+                    )
+                    updated = True
+
+    return updated
+
+
+async def connect_websocket(server, port):
+    """Connect to the ComfyUI WebSocket endpoint"""
+    global ws_connection, session_id
+
+    if ws_connection and not ws_connection.closed:
+        print("Using existing WebSocket connection")
+        return ws_connection
+
+    ws_url = f"ws://{server}:{port}/ws"
+    print(
+        f"{Fore.LIGHTYELLOW_EX}Connecting to WebSocket at:{Fore.LIGHTBLACK_EX} {ws_url}...{Style.RESET_ALL}"
+    )
+
+    try:
+        ws_connection = await websockets.connect(ws_url)
+
+        # Receive initial status message to get session ID
+        initial_msg = await ws_connection.recv()
+        initial_data = json.loads(initial_msg)
+        session_id = initial_data.get("data", {}).get("sid")
+
+        if not session_id:
+            print(
+                f"{Fore.LIGHTRED_EX}Failed to get session ID,{Style.RESET_ALL} using 'default_client' instead"
+            )
+            session_id = "default_client"
+        else:
+            print(
+                f"{Fore.LIGHTGREEN_EX}Got session ID:{Fore.LIGHTBLACK_EX} {session_id} {Style.RESET_ALL}"
+            )
+
+        return ws_connection
+    except Exception as e:
+        print(
+            f"{Fore.LIGHTRED_EX}Failed to connect to WebSocket:{Fore.LIGHTBLACK_EX} \n{e} {Style.RESET_ALL}"
+        )
+        return None
+
+
+async def execute_workflow(workflow_json):
+    """Execute the provided workflow - shared by both modes"""
+    global current_prompt_id, ws_connection, session_id, execution_status
+
+    execution_status = "running"
+
+    # Connect to WebSocket first
+    ws = await connect_websocket(server, port)
+    if not ws:
+        return False
+
+    # Submit the workflow with the session ID as client_id
+    api_url = f"http://{server}:{port}/prompt"
+    print(f"Submitting workflow to {api_url} with client_id: {session_id}")
+
+    try:
+        response = requests.post(
+            api_url, json={"prompt": workflow_json, "client_id": session_id}
+        )
+
+        if response.status_code != 200:
+            print(f"Error submitting workflow: {response.status_code}")
+            print(response.text)
+            execution_status = "error"
+            return False
+
+        result = response.json()
+        prompt_id = result.get("prompt_id")
+        current_prompt_id = prompt_id  # Store globally for signal handler
+        print(f"Workflow submitted successfully. Prompt ID: {prompt_id}")
+
+        # Check for node errors
+        if result.get("node_errors") and len(result.get("node_errors")) > 0:
+            print(f"Node errors detected: {result.get('node_errors')}")
+            execution_status = "error"
+            return False
+
+        # Subscribe to this prompt
+        subscribe_msg = {"op": "subscribe_to_prompt", "data": {"prompt_id": prompt_id}}
+        await ws_connection.send(json.dumps(subscribe_msg))
+        print(f"Subscribed to prompt: {prompt_id}")
+
+        # Monitor for events
+        print("Waiting for execution events...")
+
+        # Track execution to know when it's truly complete
+        execution_complete = False
+
+        try:
+            # Keep receiving messages until execution completes
+            while not execution_complete:
+                try:
+                    message = await ws_connection.recv()
+                    msg_data = json.loads(message)
+                    msg_type = msg_data.get("type")
+
+                    if msg_type != "status":
+                        print(f"EVENT: {msg_type}")
+
+                        # Progress updates deserve more detail
+                        if msg_type == "progress":
+                            value = msg_data.get("data", {}).get("value", 0)
+                            max_val = msg_data.get("data", {}).get("max", 100)
+                            percent = int((value / max_val) * 100)
+                            print(f"  Progress: {value}/{max_val} ({percent}%)")
+                        # Executing node updates
+                        elif msg_type == "executing":
+                            node = msg_data.get("data", {}).get("node")
+                            print(f"  Executing node: {node}")
+
+                        # Check for completion events
+                        elif msg_type in ["execution_success", "execution_complete"]:
+                            execution_complete = True
+                            print("Workflow execution completed successfully!")
+                            execution_status = "completed"
+
+                            # Give a short delay to capture any trailing messages
+                            await asyncio.sleep(2)
+                            break
+
+                        # Check for error events
+                        elif msg_type == "execution_error":
+                            print(
+                                f"Execution error: {msg_data.get('data', {}).get('exception_message', 'Unknown error')}"
+                            )
+                            execution_status = "error"
+                            execution_complete = True
+                            break
+
+                except Exception as e:
+                    print(f"Error receiving message: {e}")
+                    execution_status = "error"
+                    break
+
+            print(
+                "All events processed. Check the output folder for your generated image."
+            )
+            # Clear the prompt ID since execution is complete
+            current_prompt_id = None
+            return True
+
+        except Exception as e:
+            print(f"Error monitoring events: {e}")
+            execution_status = "error"
+
+            # If we encounter an error, attempt to cancel the workflow
+            if current_prompt_id:
+                cancel_workflow(current_prompt_id)
+            return False
+
+    except Exception as e:
+        print(f"Error executing workflow: {e}")
+        execution_status = "error"
+        return False
+
+
+async def handle_health_check(request):
+    """Simple health check endpoint"""
+    return web.Response(text="ComfyUI Workflow Runner is running")
+
+
+async def handle_queue(request):
+    """Handle queue request to execute the current workflow"""
+    global workflow_json, execution_status
+
+    if execution_status == "running":
+        return web.Response(text="Workflow is already running", status=400)
+
+    if not workflow_json:
+        return web.Response(text="No workflow loaded", status=400)
+
+    print(f"{Fore.LIGHTCYAN_EX}Received request to execute workflow{Style.RESET_ALL}")
+    asyncio.create_task(execute_workflow(workflow_json))
+
+    return web.Response(text="Workflow execution started")
+
+
+async def handle_upload_image(request):
+    """Handle image upload and update LoadImage nodes in workflow"""
+    global workflow_json, execution_status
+
+    if execution_status == "running":
+        return web.Response(
+            text="Cannot upload image while workflow is running", status=400
+        )
+
+    if not workflow_json:
+        return web.Response(text="No workflow loaded", status=400)
+
+    try:
+        # Process the multipart form data
+        reader = await request.multipart()
+
+        # Get the image field
+        field = await reader.next()
+        if field.name != "image":
+            return web.Response(text="Missing image field", status=400)
+
+        # Save to temporary file
+        filename = field.filename
+        temp_file_path = os.path.join(os.getcwd(), "temp_" + filename)
+
+        with open(temp_file_path, "wb") as f:
+            while True:
+                chunk = await field.read_chunk()
+                if not chunk:
+                    break
+                f.write(chunk)
+
+        # Now upload to ComfyUI
+        with open(temp_file_path, "rb") as f:
+            files = {"image": f}
+            upload_url = f"http://{server}:{port}/upload/image"
+            response = requests.post(upload_url, files=files)
+
+        # Remove the temporary file
+        os.remove(temp_file_path)
+
+        if response.status_code != 200:
+            return web.Response(
+                text=f"Failed to upload to ComfyUI: {response.text}", status=500
+            )
+
+        # Get the uploaded filename from response
+        upload_data = response.json()
+        new_image_name = upload_data["name"]
+
+        # Update the workflow with the new image
+        updated = update_workflow_with_image(workflow_json, new_image_name)
+
+        if not updated:
+            return web.Response(
+                text="Failed to update workflow with new image", status=500
+            )
+
+        # Optionally execute the workflow immediately
+        if AUTO_EXECUTE_ON_UPLOAD:
+            print(
+                f"{Fore.LIGHTCYAN_EX}Auto-executing workflow after image upload{Style.RESET_ALL}"
+            )
+            asyncio.create_task(execute_workflow(workflow_json))
+            return web.Response(
+                text=f"Image uploaded and workflow execution started with {new_image_name}"
+            )
+        else:
+            return web.Response(
+                text=f"Image uploaded and workflow updated with {new_image_name}. Use /queue to execute."
+            )
+
+    except Exception as e:
+        print(f"{Fore.LIGHTRED_EX}Error processing upload: {str(e)}{Style.RESET_ALL}")
+        return web.Response(text=f"Error processing upload: {str(e)}", status=500)
+
+
+async def start_minimal_http_server():
+    """Start a minimal HTTP server"""
+    app = web.Application()
+
+    # Routes
+    app.router.add_get("/health", handle_health_check)
+    app.router.add_get("/queue", handle_queue)
+    app.router.add_post("/upload/image", handle_upload_image)
+
+    # Start the server
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, server, MIDDLEWARE_HTTP_PORT)
+
+    print(
+        f"{Fore.LIGHTYELLOW_EX}Starting HTTP server on:{Fore.LIGHTBLACK_EX} http://{server}:{MIDDLEWARE_HTTP_PORT} {Style.RESET_ALL}"
+    )
+    await site.start()
+
+    return runner
+
+
 async def run_workflow_and_monitor(
     server_addr="127.0.0.1",
     port_num=8188,
     workflow_file="txt_to_img_hello_world_sdxl_api_comfy_cli_ver.json",
 ):
+    """Load workflow, execute it, and exit"""
+
     global current_prompt_id, server, port
     server = server_addr
     port = port_num
@@ -226,109 +504,9 @@ async def run_workflow_and_monitor(
 
     print("User confirmed. Proceeding with workflow execution...")
 
-    # Connect to WebSocket first
-    ws_url = f"ws://{server}:{port}/ws"
-    print(f"Connecting to WebSocket at {ws_url}...")
-
-    async with websockets.connect(ws_url) as ws:
-        # Receive initial status message to get session ID
-        initial_msg = await ws.recv()
-        initial_data = json.loads(initial_msg)
-        sid = initial_data.get("data", {}).get("sid")
-
-        if not sid:
-            print("Failed to get session ID, using 'default_client' instead")
-            sid = "default_client"
-        else:
-            print(f"Got session ID: {sid}")
-
-        # Use this session ID as client_id for the HTTP request
-        api_url = f"http://{server}:{port}/prompt"
-        print(f"Submitting workflow to {api_url} with client_id: {sid}")
-
-        # Submit the workflow with the session ID as client_id
-        response = requests.post(
-            api_url, json={"prompt": workflow_json, "client_id": sid}
-        )
-
-        if response.status_code != 200:
-            print(f"Error submitting workflow: {response.status_code}")
-            print(response.text)
-            return
-
-        result = response.json()
-        prompt_id = result.get("prompt_id")
-        current_prompt_id = prompt_id  # Store globally for signal handler
-        print(f"Workflow submitted successfully. Prompt ID: {prompt_id}")
-
-        # Subscribe to this prompt
-        subscribe_msg = {"op": "subscribe_to_prompt", "data": {"prompt_id": prompt_id}}
-        await ws.send(json.dumps(subscribe_msg))
-        print(f"Subscribed to prompt: {prompt_id}")
-
-        # Monitor for events
-        print("\nWaiting for execution events...")
-
-        # Track execution to know when it's truly complete
-        execution_complete = False
-
-        try:
-            # Keep receiving messages until execution completes
-            while not execution_complete:
-                try:
-                    message = await ws.recv()
-                    msg_data = json.loads(message)
-                    msg_type = msg_data.get("type")
-
-                    if msg_type != "status":
-                        print(f"EVENT: {msg_type}")
-
-                        # Progress updates deserve more detail
-                        if msg_type == "progress":
-                            value = msg_data.get("data", {}).get("value", 0)
-                            max_val = msg_data.get("data", {}).get("max", 100)
-                            percent = int((value / max_val) * 100)
-                            print(f"  Progress: {value}/{max_val} ({percent}%)")
-                        # Executing node updates
-                        elif msg_type == "executing":
-                            node = msg_data.get("data", {}).get("node")
-                            # Build node titles dictionary from workflow JSON
-                            titles = {}
-                            for node_id, node_data in workflow_json.items():
-                                if (
-                                    "_meta" in node_data
-                                    and "title" in node_data["_meta"]
-                                ):
-                                    titles[node_id] = node_data["_meta"]["title"]
-
-                            node_title = titles.get(node, f"Node {node}")
-                            print(f"  Executing: {node_title}")
-
-                        # Check for completion events
-                        elif msg_type in ["execution_success", "execution_complete"]:
-                            execution_complete = True
-                            print("Workflow execution completed successfully!")
-
-                            # Give a short delay to capture any trailing messages
-                            await asyncio.sleep(2)
-                            break
-
-                except Exception as e:
-                    print(f"Error receiving message: {e}")
-                    break
-
-            print(
-                "All events processed. Check the output folder for your generated image."
-            )
-            # Clear the prompt ID since execution is complete
-            current_prompt_id = None
-
-        except Exception as e:
-            print(f"Error monitoring events: {e}")
-
-            # If we encounter an error, attempt to cancel the workflow
-            if current_prompt_id:
-                cancel_workflow(current_prompt_id)
+    # Execute the workflow using our shared function
+    result = await execute_workflow(workflow_json)
+    return result
 
 
 async def run_continuous_mode(
@@ -336,9 +514,10 @@ async def run_continuous_mode(
 ):
     """Run in continuous mode - load workflow but don't execute until requested"""
 
-    global server, port, MIDDLEWARE_HTTP_PORT
+    global server, port, MIDDLEWARE_HTTP_PORT, workflow_json
     server = server_addr
     port = port_num
+    workflow_json = workflow_file
 
     # First, test connectivity to ComfyUI
     if not test_comfyui_connection(server, port):
@@ -352,13 +531,22 @@ async def run_continuous_mode(
     if not workflow_json:
         return False
 
-    # print("Continuous mode active, but no HTTP server started yet.")
-
     # Start HTTP server
     http_runner = await start_minimal_http_server()
-    print(f"{Fore.LIGHTGREEN_EX}Server is now listening on:{Fore.LIGHTBLACK_EX} http://{server}:{MIDDLEWARE_HTTP_PORT} {Style.RESET_ALL}")
+    print(
+        f"{Fore.LIGHTGREEN_EX}Server is now listening on:{Fore.LIGHTBLACK_EX} http://{server}:{MIDDLEWARE_HTTP_PORT} {Style.RESET_ALL}"
+    )
 
-    # print("Press Ctrl+C to exit.")
+    print(
+        f"""
+    {Fore.LIGHTCYAN_EX}Available endpoints:{Style.RESET_ALL}
+    - GET /health - Health check
+    - GET /queue - Trigger workflow execution
+    - POST /upload/image - Upload an image and update the workflow
+
+    {Fore.LIGHTYELLOW_EX}Auto-execute on upload:{Style.RESET_ALL} {"Enabled" if AUTO_EXECUTE_ON_UPLOAD else "Disabled"}
+    """
+    )
 
     try:
         # Keep the server running until interrupted
@@ -369,7 +557,7 @@ async def run_continuous_mode(
     finally:
         print("Cleaning up resources...")
         await http_runner.cleanup()
-    
+
     return True
 
 
